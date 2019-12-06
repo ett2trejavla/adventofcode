@@ -27,4 +27,28 @@ def find_orbits(edges):
             else:
                 n_orb+=d+1
     print(n_orb)
-find_orbits(read_input())
+#find_orbits(read_input())
+def find_path(edges):
+    you =[]
+    san =[]
+    nodesqueue = Queue()
+    nodesqueue.put(["COM"])
+    while not nodesqueue.empty():
+        nodes = nodesqueue.get()
+        node =nodes[-1]
+        for orbit in edges[node]:
+            if orbit == "YOU":
+                orbitlist =nodes
+                orbitlist.append(orbit)
+                you =orbitlist
+            if orbit == "SAN":
+                orbitlist =nodes
+                orbitlist.append(orbit)
+                san =orbitlist
+            if orbit in edges.keys():
+                orbitlist =nodes
+                orbitlist.append(orbit)
+                nodesqueue.put(orbitlist)
+    return you,san
+you, san =find_path(read_input())
+print(you)
