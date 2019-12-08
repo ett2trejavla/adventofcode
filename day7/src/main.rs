@@ -1,5 +1,8 @@
+use permutohedron::LexicalPermutation;
+use std::cmp;
 use std::fs;
 use std::io;
+use std::io::{BufRead, Cursor, Write};
 
 fn main() {
     let filename = "input.in";
@@ -10,8 +13,8 @@ fn main() {
         .map(|x| x.parse::<i32>().unwrap())
         .collect::<Vec<i32>>();
 
-    let output = run_code(&input, &mut io::stdin().lock(), &mut io::stdout()).unwrap();
-    println!("reached end: {}", output[0]);
+    let output = phase_permuations(&input,&mut [0,1,2,3,4]);
+    println!("reached end: {}", output);
 }
 #[derive(Debug)]
 enum Operation {
@@ -26,9 +29,8 @@ enum Operation {
     Stop,
 }
 
-
 fn parse_op(code: &[i32], pos: &mut usize) -> Option<Operation> {
-    let op: String = code.iter().nth(*pos)?.to_string();
+    let op: String = code.get(*pos)?.to_string();
 
     let op_code: u32 = if op.len() == 1 {
         op.parse().unwrap()
@@ -46,11 +48,11 @@ fn parse_op(code: &[i32], pos: &mut usize) -> Option<Operation> {
 
     match op_code {
         1 => {
-            return Some(Operation::Add(
+             Some(Operation::Add(
                 parse_param(),
                 parse_param(),
                 code_val.next().unwrap() as usize,
-            ));
+            ))
         }
         2 => {
             let p1 = parse_param();
@@ -58,7 +60,7 @@ fn parse_op(code: &[i32], pos: &mut usize) -> Option<Operation> {
 
             let write_to: usize = code_val.next().unwrap() as usize;
 
-            return Some(Operation::Multiply(p1, p2, write_to));
+             Some(Operation::Multiply(p1, p2, write_to))
         }
         3 => {
             let mut code_v = code.iter().skip(*pos + 1).take(1).cloned();
@@ -77,14 +79,14 @@ fn parse_op(code: &[i32], pos: &mut usize) -> Option<Operation> {
 
             let write_to: usize = parse_param() as usize;
 
-            return Some(Operation::JumpIfTrue(p1, write_to));
+             Some(Operation::JumpIfTrue(p1, write_to))
         }
         6 => {
             let p1 = parse_param();
 
             let write_to: usize = parse_param() as usize;
 
-            return Some(Operation::JumpIfFalse(p1, write_to));
+             Some(Operation::JumpIfFalse(p1, write_to))
         }
         7 => {
             let p1 = parse_param();
@@ -92,7 +94,7 @@ fn parse_op(code: &[i32], pos: &mut usize) -> Option<Operation> {
 
             let write_to: usize = code_val.next().unwrap() as usize;
 
-            return Some(Operation::LessThen(p1, p2, write_to));
+             Some(Operation::LessThen(p1, p2, write_to))
         }
         8 => {
             let p1 = parse_param();
@@ -100,17 +102,17 @@ fn parse_op(code: &[i32], pos: &mut usize) -> Option<Operation> {
 
             let write_to: usize = code_val.next().unwrap() as usize;
 
-            return Some(Operation::Equals(p1, p2, write_to));
+             Some(Operation::Equals(p1, p2, write_to))
         }
-        99 => return Some(Operation::Stop),
+        99 => Some(Operation::Stop),
         i => panic!("Not a valid operation: {}", i),
     }
 }
 
 fn run_code(
     input: &[i32],
-    prog_input: &mut dyn io::BufRead,
-    prog_output: &mut dyn io::Write,
+    prog_input: &mut dyn BufRead,
+    prog_output: &mut dyn Write,
 ) -> Option<Vec<i32>> {
     let mut code: Vec<i32> = input.to_vec();
     let mut pos: usize = 0;
@@ -152,6 +154,33 @@ fn run_code(
         };
     }
     Some(code)
+}
+fn phase_permuations(code: &[i32], phase_list: &mut [i32; 5]) -> i32 {
+    let mut max_thrust = std::i32::MIN;
+    max_thrust = cmp::max(amp_controller(code, *phase_list), max_thrust);
+    while phase_list.next_permutation() {
+        max_thrust = cmp::max(amp_controller(code, *phase_list), max_thrust);
+    }
+    max_thrust
+}
+
+fn amp_controller(code: &[i32], setting_seq: [i32; 5]) -> i32 {
+    let mut input = Cursor::new(Vec::new());
+    let mut out = "0".to_string();
+    let mut output = Cursor::new(Vec::new());
+    for phase in setting_seq.iter() {
+        input
+            .write_fmt(format_args!("{}\n{}\n", phase, out))
+            .unwrap();
+        input.set_position(0);
+        output.set_position(0);
+        run_code(&code, &mut input, &mut output).unwrap();
+        input.set_position(0);
+        output.set_position(0);
+        out = "".to_string();
+        output.read_line(&mut out).unwrap();
+    }
+    out.trim().parse().unwrap()
 }
 
 #[test]
@@ -221,5 +250,36 @@ fn test_comparator_instructions() {
         let mut out = String::new();
         output.read_line(&mut out).unwrap();
         assert_eq!(out.trim_end().parse::<i32>().unwrap(), 1001);
+    }
+}
+#[test]
+fn amp_small() {
+    let code = vec![
+        3, 15, 3, 16, 1002, 16, 10, 16, 1, 16, 15, 15, 4, 15, 99, 0, 0,
+    ];
+    assert_eq!(amp_controller(&code, [4, 3, 2, 1, 0]), 43210)
+}
+
+#[test]
+fn amp_permutations_small() {
+    {
+        let code = vec![
+            3, 15, 3, 16, 1002, 16, 10, 16, 1, 16, 15, 15, 4, 15, 99, 0, 0,
+        ];
+        assert_eq!(phase_permuations(&code, &mut [0, 1, 2, 3, 4]), 43210)
+    }
+    {
+        let code = vec![
+            3, 23, 3, 24, 1002, 24, 10, 24, 1002, 23, -1, 23, 101, 5, 23, 23, 1, 24, 23, 23, 4, 23,
+            99, 0, 0,
+        ];
+        assert_eq!(phase_permuations(&code, &mut [0, 1, 2, 3, 4]), 54321)
+    }
+    {
+        let code = vec![
+            3, 31, 3, 32, 1002, 32, 10, 32, 1001, 31, -2, 31, 1007, 31, 0, 33, 1002, 33, 7, 33, 1,
+            33, 31, 31, 1, 32, 31, 31, 4, 31, 99, 0, 0, 0,
+        ];
+        assert_eq!(phase_permuations(&code, &mut [0, 1, 2, 3, 4]), 65210)
     }
 }
