@@ -1,52 +1,61 @@
-// use std::io::{Read, Write};
+use std::io::{Read, Write};
 
-#[derive(Debug,PartialEq)]
-pub struct Code(Vec<i32>);
-
-struct ProgramState {
-    code: Code,
+pub struct ProgramState {
+    code: Vec<i64>,
     pos: usize,
-    rel_base_pos: i32,
-    // prog_in: &'a mut dyn Read,
-    // prog_out: &'a mut dyn Write,
+    rel_base_pos: i64,
+}
+pub struct PausedState<'prog_run> {
+    state: ProgramState,
+    prog_in: &'prog_run mut dyn Read,
+    prog_out: &'prog_run mut dyn Write,
+    inst: Inst,
 }
 
-pub fn run(code: Code) -> Option<Code> {
-    let mut state = ProgramState {
+pub fn start_run<'prog_run>(
+    code: Vec<i64>,
+    prog_in: &'prog_run mut dyn Read,
+    prog_out: &'prog_run mut dyn Write,
+) -> Option<Vec<i64>> {
+    let state = ProgramState {
         code,
         pos: 0,
         rel_base_pos: 0,
     };
+    run(state, prog_in, prog_out)
+}
+pub fn resume_run(mut ps: PausedState) -> Option<Vec<i64>> {
+    if let InstructionResult::Stop = ps.inst.process(&mut ps.state, ps.prog_in, ps.prog_out) {
+        None
+    } else {
+        run(ps.state, ps.prog_in, ps.prog_out)
+    }
+}
+fn run<'prog_run>(
+    mut state: ProgramState,
+    prog_in: &'prog_run mut dyn Read,
+    prog_out: &'prog_run mut dyn Write,
+) -> Option<Vec<i64>> {
     loop {
-        println!("{:?}",&state.code);
+        println!("{:?}", &state.code);
         let instruction = parse_instruction(&state)?;
-        println!("{:?}",&instruction);
-        if let InstructionResult::Break = instruction.process(&mut state) {
+        println!("{:?}", &instruction);
+        if let InstructionResult::Stop = instruction.process(&mut state, prog_in, prog_out) {
             break;
         }
     }
     Some(state.code)
 }
-trait Instruction {
-    const INST_ID: u8;
-    const SIZE: usize;
-    fn parse_parameters<I>(state: &ProgramState, param_mode: I) -> Option<Self>
-    where
-        I: Iterator<Item = ParameterMode>,
-        Self: Sized;
-    fn process(self, state: &mut ProgramState) -> InstructionResult;
-}
-
-
 
 enum InstructionResult {
     Continue,
     Yield,
-    Break,
+    Stop,
 }
 
-fn parse_instruction(state: &ProgramState) -> Option<Inst> {
-    let mut to_parse: String = state.code.0.get(state.pos)?.to_string();
+fn parse_instruction<'a>(state: &'a ProgramState) -> Option<Inst> {
+    let mut code_iter = state.code.iter().skip(state.pos).take(Inst::MAX_SIZE);
+    let mut to_parse: String = code_iter.next()?.to_string();
     while to_parse.len() < 5 {
         to_parse.insert(0, '0');
     }
@@ -63,31 +72,9 @@ fn parse_instruction(state: &ProgramState) -> Option<Inst> {
             ),
         }
     });
-     match inst_id {
-        Add::INST_ID => Some(Inst::Add(Add::parse_parameters(state, param_mode)?)),
-        Multiply::INST_ID=>Some(Inst::Multiply(Multiply::parse_parameters(state, param_mode)?)),
-        Stop::INST_ID=>Some(Inst::Stop(Stop::parse_parameters(state, param_mode)?)),
-        i => panic!("{} is an unknown instruction", i),
-    }
+    Inst::new(inst_id, code_iter, param_mode, state)
 }
 
-fn parse_parameter<'a>(
-    state: &'a ProgramState,
-) -> impl Fn((&'a i32, ParameterMode, ParameterPriv)) -> Option<i32> {
-    move |(val, mode, pri): (&'a i32, ParameterMode, ParameterPriv)| {
-        println!("{:?},{:?},{:?}",val,mode,pri);
-        let param = match mode {
-            ParameterMode::Position => *val,
-            ParameterMode::Immediate => return Some(*val),
-            ParameterMode::Relative => state.rel_base_pos + *val,
-        };
-
-        match pri {
-            ParameterPriv::Write => Some(param),
-            ParameterPriv::Read => state.code.0.iter().cloned().nth(param as usize),
-        }
-    }
-}
 #[derive(Debug)]
 enum ParameterMode {
     Position,
@@ -100,92 +87,177 @@ enum ParameterPriv {
     Write,
 }
 #[derive(Debug)]
-enum Inst{
-    Add(Add),
-    Multiply(Multiply),
-    Stop(Stop)
+pub enum Inst {
+    Add(i64, i64, usize),
+    Multiply(i64, i64, usize),
+    Input(usize),
+    Output(i64),
+    JumpIfTrue(i64, usize),
+    JumpIfFalse(i64, usize),
+    LessThan(i64, i64, usize),
+    Equals(i64, i64, usize),
+    RelativeBaseOffset(i64),
+    Stop,
 }
-impl Inst{
-    fn process(self,state: &mut ProgramState)->InstructionResult{
-        match self{
-            Inst::Add(instuction)=>instuction.process(state),
-            Inst::Multiply(instuction)=>instuction.process(state),
-            Inst::Stop(instuction)=>instuction.process(state)
+impl Inst {
+    const MAX_SIZE: usize = 4;
+    fn new<'a, I, J>(
+        inst_id: u8,
+        mut code_iter: I,
+        mut mode: J,
+        state: &'a ProgramState,
+    ) -> Option<Self>
+    where
+        I: Iterator<Item = &'a i64>,
+        J: Iterator<Item = ParameterMode>,
+    {
+        let parser = parameter_parser(state);
+        match inst_id {
+            1 => Some(Inst::Add(
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+            )),
+            2 => Some(Inst::Multiply(
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+            )),
+            3 => Some(Inst::Input(
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+            )),
+            4 => Some(Inst::Output(parser((
+                code_iter.next()?,
+                mode.next()?,
+                ParameterPriv::Read,
+            ))?)),
+            5 => Some(Inst::JumpIfTrue(
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))? as usize,
+            )),
+            6 => Some(Inst::JumpIfFalse(
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))? as usize,
+            )),
+            7 => Some(Inst::LessThan(
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+            )),
+            8 => Some(Inst::Equals(
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+            )),
+            9 => Some(Inst::RelativeBaseOffset(parser((
+                code_iter.next()?,
+                mode.next()?,
+                ParameterPriv::Read,
+            ))?)),
+            99 => Some(Inst::Stop),
+            i => panic!("{} is not a valid instruction_id", i),
         }
     }
+    fn size(&self) -> usize {
+        match *self {
+            Inst::Add(_, _, _)
+            | Inst::Multiply(_, _, _)
+            | Inst::LessThan(_, _, _)
+            | Inst::Equals(_, _, _) => 4,
+            Inst::JumpIfTrue(_, _) | Inst::JumpIfFalse(_, _) => 3,
+            Inst::Input(_) | Inst::Output(_) | Inst::RelativeBaseOffset(_) => 2,
+            Inst::Stop => 1,
+        }
+    }
+    fn process(
+        self,
+        state: &mut ProgramState,
+        mut prog_in: &mut dyn Read,
+        prog_out: &mut dyn Write,
+    ) -> InstructionResult {
+        let res = match self {
+            Inst::Add(term1, term2, write_sum_to) => {
+                *state.code.get_mut(write_sum_to).unwrap() = term1 + term2;
+                state.pos += self.size();
+
+                InstructionResult::Continue
+            }
+            Inst::Multiply(factor1, factor2, write_prod_to) => {
+                *state.code.get_mut(write_prod_to).unwrap() = factor1 * factor2;
+                state.pos += self.size();
+
+                InstructionResult::Continue
+            }
+            Inst::Input(write_to) => {
+                use std::io::{BufRead, BufReader};
+                let mut input = String::new();
+                let mut locked_input = BufReader::new(&mut prog_in);
+                locked_input.read_line(&mut input).unwrap();
+                state.code[write_to] = input.trim().parse().unwrap();
+                state.pos += self.size();
+
+                InstructionResult::Continue
+            }
+            Inst::Output(read_from) => {
+                prog_out.write_fmt(format_args!("{}\n", read_from)).unwrap();
+                state.pos += self.size();
+
+                InstructionResult::Continue
+            }
+            Inst::JumpIfTrue(val, jmp_to) => {
+                state.pos = if val != 0 {
+                    jmp_to
+                } else {
+                    state.pos + self.size()
+                };
+                InstructionResult::Continue
+            }
+            Inst::JumpIfFalse(val, jmp_to) => {
+                state.pos = if val == 0 {
+                    jmp_to
+                } else {
+                    state.pos + self.size()
+                };
+                InstructionResult::Continue
+            }
+            Inst::LessThan(a, b, write_to) => {
+                state.code[write_to] = if a < b { 1 } else { 0 };
+                state.pos += self.size();
+
+                InstructionResult::Continue
+            }
+            Inst::Equals(a, b, write_to) => {
+                state.code[write_to] = if a == b { 1 } else { 0 };
+                state.pos += self.size();
+
+                InstructionResult::Continue
+            }
+            Inst::RelativeBaseOffset(offset) => {
+                state.rel_base_pos += offset;
+                state.pos += self.size();
+                InstructionResult::Continue
+            }
+            Inst::Stop => InstructionResult::Stop,
+        };
+        res
+    }
 }
-#[derive(Debug)]
-struct Add(i32, i32, usize);
 
-impl Instruction for Add {
-    const INST_ID: u8 = 1;
-    const SIZE: usize = 4;
-    fn parse_parameters<I>(state: &ProgramState, mut mode: I) -> Option<Self>
-    where
-        I: Iterator<Item = ParameterMode>,
-    {
-        let parser = parse_parameter(state);
-        let mut cur_code_pos = state.code.0.iter().skip(state.pos+1);
+fn parameter_parser<'a>(
+    state: &'a ProgramState,
+) -> impl Fn((&'a i64, ParameterMode, ParameterPriv)) -> Option<i64> {
+    move |(val, mode, pri): (&'a i64, ParameterMode, ParameterPriv)| {
+        println!("{:?},{:?},{:?}", val, mode, pri);
+        let param = match mode {
+            ParameterMode::Position => *val,
+            ParameterMode::Immediate => return Some(*val),
+            ParameterMode::Relative => state.rel_base_pos + *val,
+        };
 
-        let term1 = parser((cur_code_pos.next()?, mode.next()?, ParameterPriv::Read))?;
-        let term2 = parser((cur_code_pos.next()?, mode.next()?, ParameterPriv::Read))?;
-        let write_sum_to = parser((cur_code_pos.next()?, mode.next()?, ParameterPriv::Write))?;
-
-        Some(Self(term1, term2, write_sum_to as usize))
-    }
-    fn process(self, state: &mut ProgramState) -> InstructionResult {
-        let Self(term1, term2, write_sum_to) = self;
-
-        *state.code.0.get_mut(write_sum_to).unwrap() = term1 + term2;
-        
-        state.pos += Self::SIZE;
-        InstructionResult::Continue
-    }
-}
-
-#[derive(Debug)]
-struct Multiply(i32, i32, usize);
-
-impl Instruction for Multiply {
-    const INST_ID: u8 = 2;
-    const SIZE: usize = 4;
-    fn parse_parameters<I>(state: &ProgramState, mut mode: I) -> Option<Self>
-    where
-        I: Iterator<Item = ParameterMode>,
-    {
-        let parser = parse_parameter(state);
-        let mut cur_code_pos = state.code.0.iter().skip(state.pos+1);
-
-        let factor1 = parser((cur_code_pos.next()?, mode.next()?, ParameterPriv::Read))?;
-        let factor2 = parser((cur_code_pos.next()?, mode.next()?, ParameterPriv::Read))?;
-        let write_prod_to = parser((cur_code_pos.next()?, mode.next()?, ParameterPriv::Write))?;
-
-        Some(Self(factor1, factor2, write_prod_to as usize))
-    }
-    fn process(self, state: &mut ProgramState) -> InstructionResult {
-        let Self(factor1, factor2, write_sum_to) = self;
-
-        *state.code.0.get_mut(write_sum_to).unwrap() = factor1 * factor2;
-
-        state.pos += Self::SIZE;
-        InstructionResult::Continue
-    }
-}
-
-#[derive(Debug)]
-struct Stop;
-
-impl Instruction for Stop {
-    const INST_ID: u8 = 99;
-    const SIZE: usize = 1;
-    fn parse_parameters<I>(_: &ProgramState, _: I) -> Option<Self>
-    where
-        I: Iterator<Item = ParameterMode>,
-    {
-        Some(Self)
-    }
-    fn process(self, _: &mut ProgramState) -> InstructionResult {
-        InstructionResult::Break
+        match pri {
+            ParameterPriv::Write => Some(param),
+            ParameterPriv::Read => state.code.iter().cloned().nth(param as usize),
+        }
     }
 }
 
@@ -193,10 +265,52 @@ impl Instruction for Stop {
 mod tests {
     use super::*;
     #[test]
-    fn test_computer() {
-        let input_code = Code(vec![1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50]);
-        let expected_output = Code(vec![3500, 9, 10, 70, 2, 3, 11, 0, 99, 30, 40, 50]);
-        let output = run(input_code).unwrap();
+    fn test_add_mul() {
+        use std::io::{stdin, stdout};
+        let input_code = vec![1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50];
+        let expected_output = vec![3500, 9, 10, 70, 2, 3, 11, 0, 99, 30, 40, 50];
+        let mut prog_in = stdin();
+        let output = start_run(input_code, &mut prog_in, &mut stdout()).unwrap();
         assert_eq!(output, expected_output);
+    }
+    use std::io::BufRead;
+    use std::io::Cursor;
+    #[test]
+    fn test_jump_pos() {
+        let mut prog_in = Cursor::new(vec![b'0', b'\n']);
+        let mut prog_out = Cursor::new(Vec::<u8>::new());
+        let input_code = vec![3, 12, 6, 12, 15, 1, 13, 14, 13, 4, 13, 99, -1, 0, 1, 9];
+        start_run(input_code.clone(), &mut prog_in, &mut prog_out).unwrap();
+        prog_out.set_position(0);
+        let mut out = String::new();
+        prog_out.read_line(&mut out).unwrap();
+        assert_eq!(out.trim().parse::<u8>().unwrap(), 0u8);
+
+        prog_in = Cursor::new(vec![b'1', b'\n']);
+        prog_out = Cursor::new(Vec::<u8>::new());
+        start_run(input_code, &mut prog_in, &mut prog_out).unwrap();
+        prog_out.set_position(0);
+        let mut out = String::new();
+        prog_out.read_line(&mut out).unwrap();
+        assert_eq!(out.trim().parse::<u8>().unwrap(), 1u8);
+    }
+    #[test]
+    fn test_immediate_mode() {
+        let mut prog_in = Cursor::new(vec![b'0', b'\n']);
+        let mut prog_out = Cursor::new(Vec::<u8>::new());
+        let input_code = vec![3, 3, 1105, -1, 9, 1101, 0, 0, 12, 4, 12, 99, 1];
+        start_run(input_code.clone(), &mut prog_in, &mut prog_out).unwrap();
+        prog_out.set_position(0);
+        let mut out = String::new();
+        prog_out.read_line(&mut out).unwrap();
+        assert_eq!(out.trim().parse::<u8>().unwrap(), 0u8);
+
+        prog_in = Cursor::new(vec![b'1', b'\n']);
+        prog_out = Cursor::new(Vec::<u8>::new());
+        start_run(input_code, &mut prog_in, &mut prog_out).unwrap();
+        prog_out.set_position(0);
+        let mut out = String::new();
+        prog_out.read_line(&mut out).unwrap();
+        assert_eq!(out.trim().parse::<u8>().unwrap(), 1u8);
     }
 }
