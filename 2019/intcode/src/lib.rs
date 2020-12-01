@@ -114,46 +114,46 @@ impl Inst {
         let parser = parameter_parser(state);
         match inst_id {
             1 => Some(Inst::Add(
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write)) as usize,
             )),
             2 => Some(Inst::Multiply(
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write)) as usize,
             )),
             3 => Some(Inst::Input(
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write)) as usize,
             )),
             4 => Some(Inst::Output(parser((
                 code_iter.next()?,
                 mode.next()?,
                 ParameterPriv::Read,
-            ))?)),
+            )))),
             5 => Some(Inst::JumpIfTrue(
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))? as usize,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)) as usize,
             )),
             6 => Some(Inst::JumpIfFalse(
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))? as usize,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)) as usize,
             )),
             7 => Some(Inst::LessThan(
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write)) as usize,
             )),
             8 => Some(Inst::Equals(
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read))?,
-                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write))? as usize,
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Read)),
+                parser((code_iter.next()?, mode.next()?, ParameterPriv::Write)) as usize,
             )),
             9 => Some(Inst::RelativeBaseOffset(parser((
                 code_iter.next()?,
                 mode.next()?,
                 ParameterPriv::Read,
-            ))?)),
+            )))),
             99 => Some(Inst::Stop),
             i => panic!("{} is not a valid instruction_id", i),
         }
@@ -245,18 +245,21 @@ impl Inst {
 
 fn parameter_parser<'a>(
     state: &'a ProgramState,
-) -> impl Fn((&'a i64, ParameterMode, ParameterPriv)) -> Option<i64> {
+) -> impl Fn((&'a i64, ParameterMode, ParameterPriv)) -> i64 {
     move |(val, mode, pri): (&'a i64, ParameterMode, ParameterPriv)| {
         println!("{:?},{:?},{:?}", val, mode, pri);
         let param = match mode {
             ParameterMode::Position => *val,
-            ParameterMode::Immediate => return Some(*val),
+            ParameterMode::Immediate => return *val,
             ParameterMode::Relative => state.rel_base_pos + *val,
         };
 
         match pri {
-            ParameterPriv::Write => Some(param),
-            ParameterPriv::Read => state.code.iter().cloned().nth(param as usize),
+            ParameterPriv::Write => param,
+            ParameterPriv::Read => match state.code.iter().cloned().nth(param as usize){
+                Some(i)=>i,
+                None=>0
+            }
         }
     }
 }
@@ -312,5 +315,17 @@ mod tests {
         let mut out = String::new();
         prog_out.read_line(&mut out).unwrap();
         assert_eq!(out.trim().parse::<u8>().unwrap(), 1u8);
+    }
+    #[test]
+    fn test_relative_base(){
+        let mut prog_in = Cursor::new(Vec::<u8>::new());
+        let mut prog_out = Cursor::new(Vec::<u8>::new());
+        let input_code = vec![1102,34915192,34915192,7,4,7,99,0];
+        start_run(input_code.clone(), &mut prog_in, &mut prog_out).unwrap();
+        prog_out.set_position(0);
+        let mut out = String::new();
+        prog_out.read_line(&mut out).unwrap();
+        assert_eq!(out.trim().parse::<i64>().unwrap(), 1_219_070_632_396_864);
+        
     }
 }

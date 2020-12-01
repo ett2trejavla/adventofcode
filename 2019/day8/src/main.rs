@@ -38,7 +38,7 @@ fn decode_image(input: &str, (rows, cols): (usize, usize)) -> Vec<char> {
             .unwrap();
         image.push(match *pixel{
             '0' =>'.',
-            '1' => '8',
+            '1' => '#',
             _ => panic!("not possible")
         });
     }
