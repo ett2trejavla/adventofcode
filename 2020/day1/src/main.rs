@@ -1,4 +1,3 @@
-use num_traits::Num;
 use std::fs;
 
 fn main() {
@@ -37,11 +36,14 @@ fn solve_2(expenses: Vec<u32>) {
     }
 }
 
-fn search_triangle_product<'a, 'b, T: Num, P: Fn(&T, &T) -> bool>(
+fn search_triangle_product<'a, 'b, T, U, P>(
     a: &'a [T],
-    b: &'b [T],
+    b: &'b [U],
     predicate: P,
-) -> Option<(&'a T, &'b T)> {
+) -> Option<(&'a T, &'b U)>
+where
+    P: Fn(&T, &U) -> bool,
+{
     for (i, a_i) in a.iter().enumerate() {
         for b_i in b.iter().skip(i + 1) {
             if predicate(a_i, b_i) {
