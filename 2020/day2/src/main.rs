@@ -90,7 +90,7 @@ fn valid_password2(heur: &&PassHeuristic) -> bool {
     let fst_char = pass.chars().nth(lb - 1);
     let snd_char = pass.chars().nth(ub - 1);
     match (fst_char, snd_char) {
-        (Some(c1), Some(c2)) => (*c == c1 || *c == c2) && !(*c == c1 && *c == c2),
+        (Some(c1), Some(c2)) => (*c == c1) ^ (*c == c2),
         _ => false,
     }
 }
