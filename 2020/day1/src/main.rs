@@ -8,7 +8,7 @@ fn main() {
         .iter()
         .map(|x| x.parse::<u32>().unwrap())
         .collect::<Vec<u32>>();
-    //solve_1(expenses)
+    solve_1(expenses.clone());
     solve_2(expenses)
 }
 
