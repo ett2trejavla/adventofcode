@@ -22,14 +22,13 @@ fn sol_1(group_custums_dec: &[&str]) {
 fn sol_2(group_custums_dec: Vec<&str>) {
     let sum_customs_dec: usize = group_custums_dec
         .iter()
-        .map(|s| {
-            s.split_whitespace()
-                .map(|s| s.chars().collect::<HashSet<_>>())
-                .collect::<Vec<_>>()
-                .into_iter()
+        .map(|group| {
+            group.split_whitespace()
+                .map(|person| person.chars().collect::<HashSet<_>>())
                 .fold_first(|acc, x| acc.intersection(&x).cloned().collect())
+                .unwrap()
+                .len()
         })
-        .map(|set| set.unwrap().len())
         .sum();
 
     println!("number of customs declarations {}", sum_customs_dec)
